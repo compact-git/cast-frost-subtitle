@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgc" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset=".45" stop-color="#22d3ee"/><stop offset="1" stop-color="#0e7490"/></linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d7f3ff"/></linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4aa8ff"/><stop offset="1" stop-color="#7c6cff"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgc)"/>
+  <ellipse cx="256" cy="414" rx="200" ry="50" fill="#0b4a5c" opacity=".28"/>
+  <ellipse cx="256" cy="396" rx="210" ry="54" fill="url(#plate)" stroke="#16304a" stroke-width="12"/>
+  <ellipse cx="256" cy="390" rx="150" ry="30" fill="none" stroke="#9ad8ee" stroke-width="6"/>
+  <rect x="116" y="74" width="280" height="280" rx="64" fill="url(#chip)" stroke="#16304a" stroke-width="12"/>
+  <g fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" transform="translate(256 214)">
+    <path d="M0-100V100M-87-50L87 50M-87 50L87-50"/>
+    <path d="M-26-76L0-52L26-76M-26 76L0 52L26 76"/>
+    <path d="M-78-16L-46-26L-52-58M78 16L46 26L52 58M-78 16L-46 26L-52 58M78-16L46-26L52-58"/>
+  </g>
+  <circle cx="372" cy="98" r="34" fill="#ff4d6d" stroke="#16304a" stroke-width="12"/>
+</svg>

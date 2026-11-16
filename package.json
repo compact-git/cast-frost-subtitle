@@ -1,8 +1,8 @@
 {
   "name": "cast-frost-subtitle",
   "productName": "Cast Frost 字幕",
-  "version": "0.2.3",
-  "description": "Cast Frost Web の字幕を自分の画面に枠なし・透明・最前面で表示し、エフェクトの全体ホットキーを受け付ける補助アプリ",
+  "version": "0.3.5",
+  "description": "Cast Frost Web の字幕を自分の画面に枠なし・透明・最前面で表示し、エフェクトの全体ホットキーと YouTube Live のチャットの読み取りを受け持つ補助アプリ",
   "main": "main.js",
   "author": "compact",
   "license": "MIT",
@@ -22,9 +22,35 @@
     "appId": "jp.compact.castfrost.subtitle",
     "productName": "Cast Frost 字幕",
     "artifactName": "CastFrostSubtitle_v${version}.exe",
-    "files": ["main.js", "preload.js", "overlay.html", "overlay.js", "subrender.js", "tray.png", "tray@2x.png", "build/icon.png", "package.json"],
-    "directories": { "output": "dist", "buildResources": "build" },
-    "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "icon": "build/icon.ico" },
-    "portable": { "requestExecutionLevel": "user" }
+    "files": [
+      "main.js",
+      "youtube.js",
+      "preload.js",
+      "overlay.html",
+      "overlay.js",
+      "subrender.js",
+      "tray.png",
+      "tray@2x.png",
+      "build/icon.png",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
+    }
   }
 }

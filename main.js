@@ -3,12 +3,14 @@
  * 自分の画面に「枠なし・透明・最前面・クリックが通り抜ける」窓で表示する。
  * あわせて、アプリが登録した「全体ホットキー」を Windows に登録し、押されたらアプリへ知らせる
  * (ゲーム中などブラウザが手前にない時でもエフェクトを出せるように)。
+ * YouTube Live のチャットも、アプリの代わりにこのPCから読む(ブラウザからは直接読めないため)。
  */
 'use strict';
 const { app, BrowserWindow, Tray, Menu, screen, globalShortcut, ipcMain, dialog, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
+const youtube = require('./youtube');
 
 const VERSION = app.getVersion();
 const NAME = 'Cast Frost 字幕';
@@ -130,6 +132,21 @@ function fireHotkey(id) {
   const msg = JSON.stringify({ app: EXE_ID, type: 'hotkey', id, at: Date.now() });
   if (wss) for (const c of wss.clients) { if (c.readyState === 1) { try { c.send(msg); } catch (e) {} } }
 }
+// ---------- YouTube Live のチャット(アプリから頼まれて読む) ----------
+const YT_OPS = { resolve: d => youtube.resolve(d.q), init: d => youtube.init(d.v), next: d => youtube.next(d.body || {}) };
+let ytBusy = 0;
+async function ytRequest(ws, d) {
+  const reqId = String(d.reqId || '').slice(0, 40);
+  const reply = o => { try { if (ws.readyState === 1) ws.send(JSON.stringify(Object.assign({ app: EXE_ID, type: 'res', reqId }, o))); } catch (e) {} };
+  const op = YT_OPS[d.op];
+  if (!op) return reply({ ok: false, error: { code: 'badop', message: 'unknown op' } });
+  if (ytBusy >= 8) return reply({ ok: false, error: { code: 'busy', message: '補助exeが混み合っています' } });
+  ytBusy++;
+  try { reply({ ok: true, data: await op(d) }); }
+  catch (e) { reply({ ok: false, error: { code: e.code || 'failed', status: e.status || 0, message: String(e.message || e) } }); }
+  finally { ytBusy--; }
+}
+
 function setHotkeysOn(on) {
   cfg.hotkeysOn = !!on; saveCfg();
   if (!on) clearHotkeys();
@@ -183,11 +200,12 @@ function startServer() {
   wss.on('connection', ws => {
     clients++; sendState(); buildMenu();
     // 保存場所(表示用)と、ホットキーに対応していることをアプリに伝える
-    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys'], hotkeysOn: cfg.hotkeysOn !== false }));
+    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube'], hotkeysOn: cfg.hotkeysOn !== false }));
     if (lastPayload && win) win.webContents.send('payload', lastPayload);
     ws.on('message', raw => {
       let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
       if (!d || d.app !== APP_ID) return;
+      if (d.type === 'yt') { ytRequest(ws, d); return; }
       if (d.type === 'hotkeys') {
         const results = setHotkeys(d.keys);
         try { ws.send(JSON.stringify({ app: EXE_ID, type: 'hotkeys-result', results, hotkeysOn: cfg.hotkeysOn !== false })); } catch (e) {}

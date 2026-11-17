@@ -1,6 +1,6 @@
 /* 演出・フリップを、自分の画面の窓(字幕の窓)に出す(Cast Frost Web v0.7.3 以降)
  * アプリから来るメッセージは、OBS 用の演出ファイルと同じ形({ fx:'play' | 'release' | 'cancel-manual' | 'stop' | 'asset' })。
- * 出しっぱなし(フリップのボード系)は字幕の下(#fxb)、それ以外は字幕の上(#fxt)に出す。
+ * 全部、字幕の上(#fxt)に出す。
  */
 (() => {
   'use strict';
@@ -42,7 +42,7 @@
       for (let i = 0; i < 40 && need.some(id => !assets.has(id)); i++) await new Promise(r => setTimeout(r, 150));
     }
     if (d.hold) { relPending.delete(d.key); if (held.has(d.key)) return; }
-    const host = d.hold ? fxb : fxt;
+    const host = fxt;   // 全部、字幕の上(出しっぱなしも)
     // クリップは動画ファイルで流す(この窓はパソコンの中のファイルなので、Twitch の埋め込みは使えない)
     const tw = { parent: ['localhost'], muted: !!d.muted, volMode: 'player', resolveClip, noEmbed: true, host: fxt };
     const h = CFFx.play(host, v.effect, { assets: urlOf, vars: d.vars || {}, hold: !!d.hold, muted: !!d.muted, twitch: tw });

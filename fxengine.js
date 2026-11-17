@@ -318,7 +318,7 @@
           // そのため、縮小した舞台の中ではなく、表示先にそのままの大きさで重ね、いちばん上に置く(400×300 ピクセル以上が必要)
           box.style.visibility = 'hidden';
           const vbox = doc.createElement('div');
-          Object.assign(vbox.style, { position: 'absolute', zIndex: '2147483000', borderRadius: '10px', overflow: 'hidden', background: '#000' });
+          Object.assign(vbox.style, { position: 'absolute', zIndex: '2147483000', borderRadius: '10px', overflow: 'hidden', background: '#000', pointerEvents: 'auto' });   // 押せる(Twitch の「ミュート解除」など)
           // 動画は「最前面」でないと Twitch が止めるので、opts.twitch.host(いちばん上の層)があればそこに重ねる
           const th = (opts.twitch.host && opts.twitch.host.isConnected) ? opts.twitch.host : host;
           const place = () => {

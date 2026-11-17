@@ -81,6 +81,14 @@
       if (cur && cur.video) { try { cur.video.pause(); cur.video.removeAttribute('src'); cur.video.load(); } catch (e) {} }
       box.innerHTML = ''; cur = null;
     }
+    /** 音なしで流れている時の「🔊 音を出す」ボタン。押すとその窓で音つきの再生が許されるので、次のクリップからは音つきで流れる */
+    function unmuteBtn(v) {
+      const b = doc.createElement('button');
+      b.type = 'button'; b.textContent = '🔊 クリックで音を出す';
+      Object.assign(b.style, { position: 'absolute', right: '10px', bottom: '10px', zIndex: '3', font: '800 16px sans-serif', padding: '8px 14px', borderRadius: '10px', border: '2px solid #fff', background: 'rgba(20,10,40,.85)', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' });
+      b.onclick = ev => { ev.stopPropagation(); v.muted = false; v.volume = opts.volMode === 'external' ? 1 : vol; v.play().catch(() => {}); b.remove(); };
+      box.appendChild(b);
+    }
     function frame(src) {
       const f = doc.createElement('iframe');
       f.src = src; f.allow = 'autoplay; fullscreen'; f.setAttribute('allowfullscreen', '');
@@ -108,7 +116,11 @@
           const nextOnce = () => { if (done || stopped || !cur || cur.video !== v) return; done = true; playOne(); };
           v.addEventListener('ended', nextOnce);
           v.addEventListener('error', () => { if (cur && cur.video === v) { v.remove(); cur = null; embedClip(it); } });
-          const p = v.play(); if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });   // 音つきが止められたら、音なしで流す
+          const p = v.play();
+          if (p && p.catch) p.catch(() => {   // 音つきが止められたら(その窓をまだ一度も押していない時)、音なしで流して「音を出す」ボタンを出す
+            v.muted = true; v.play().catch(() => {});
+            if (!muted) unmuteBtn(v);
+          });
           after((Number(it.dur) || 60) + 8, nextOnce);   // 念のため(ended が来ない時)
           return;
         }

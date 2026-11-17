@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Cast Frost 動画プレーヤー</title>
+<!-- OBS の「ブラウザ」ソースで、URL に http://localhost:ポート/player を入れて使う(幅1920・高さ1080)。
+     Cast Frost Web のフリップの「📺 Twitch 動画」を流す。背景は透明。 -->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .tw { position: absolute; border-radius: 10px; overflow: hidden; opacity: 0; transition: opacity .4s ease; background: #000; }
+  #hint { position: fixed; left: 10px; bottom: 10px; font: 700 15px sans-serif; color: #fff; background: rgba(20, 10, 40, .7);
+    padding: 5px 12px; border-radius: 10px; transition: opacity 1s; }
+  #hint.hide { opacity: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hint">Cast Frost 動画プレーヤー:準備中…</div>
+<script src="/twplay.js"></script>
+<script>
+(() => {
+  'use strict';
+  const W = 1920, H = 1080;
+  const stage = document.getElementById('stage'), hint = document.getElementById('hint');
+  let hideT = 0;
+  function say(t, keep) { hint.textContent = 'Cast Frost 動画プレーヤー:' + t; hint.classList.remove('hide'); clearTimeout(hideT); if (!keep) hideT = setTimeout(() => hint.classList.add('hide'), 5000); }
+  function fit() {
+    const k = Math.min(innerWidth / W, innerHeight / H) || 1;
+    stage.style.transform = `translate(${(innerWidth - W * k) / 2}px,${(innerHeight - H * k) / 2}px) scale(${k})`;
+  }
+  addEventListener('resize', fit); fit();
+
+  const active = new Map();   // key → { parts:[{ d, run, t }], t }
+  function start(m) {
+    stop(m.key, true);
+    const parts = [];
+    for (const L of m.layers || []) {
+      const w = (Number(L.size) || 60) / 100 * W, h = (Number(L.size) || 60) / 100 * H;
+      const d = document.createElement('div'); d.className = 'tw';
+      Object.assign(d.style, { width: w + 'px', height: h + 'px', left: ((Number(L.x) || 50) / 100 * W - w / 2) + 'px', top: ((Number(L.y) || 50) / 100 * H - h / 2) + 'px' });
+      d.style.transitionDuration = (L.inDur != null ? L.inDur : 0.4) + 's';
+      const part = { d, run: null, t: 0 };
+      part.t = setTimeout(() => {   // 「始まる(秒)」
+        stage.appendChild(d);
+        requestAnimationFrame(() => { d.style.opacity = String(L.opacity != null ? L.opacity : 1); });
+        // 音量は OBS のミキサー(アプリが合わせる)で下げるので、プレーヤーは 100%
+        part.run = CFTw.run(d, L, { parent: [location.hostname || 'localhost'], volMode: 'external' });
+      }, Math.max(0, Number(L.start) || 0) * 1000);
+      part.out = L.outDur != null ? L.outDur : 0.4;
+      parts.push(part);
+    }
+    const a = { parts, t: 0 };
+    if (!m.hold && m.durMs > 0) a.t = setTimeout(() => stop(m.key), m.durMs);
+    active.set(m.key, a);
+  }
+  function stop(key, now) {
+    const a = active.get(key); if (!a) return;
+    active.delete(key); clearTimeout(a.t);
+    a.parts.forEach(p => {
+      clearTimeout(p.t);
+      if (now) { if (p.run) p.run.stop(); p.d.remove(); return; }
+      p.d.style.transitionDuration = p.out + 's'; p.d.style.opacity = '0';
+      setTimeout(() => { if (p.run) p.run.stop(); p.d.remove(); }, p.out * 1000 + 50);
+    });
+  }
+  function stopAll() { [...active.keys()].forEach(k => stop(k)); }
+
+  let retry = 0;
+  function connect() {
+    let ws;
+    try { ws = new WebSocket(`ws://${location.host}/player-ws`); } catch (e) { setTimeout(connect, 3000); return; }
+    ws.onopen = () => { retry = 0; say('接続OK(フリップのボタンを待っています)'); };
+    ws.onmessage = ev => {
+      let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      if (!d || d.type !== 'vid') return;
+      if (d.cmd === 'start') { start(d); say('再生中 🎬'); }
+      else if (d.cmd === 'stop') stop(d.key);
+      else if (d.cmd === 'stopAll') stopAll();
+    };
+    ws.onclose = () => { say('補助exe とつながっていません(再接続を待っています)', true); setTimeout(connect, Math.min(10000, 1000 * ++retry)); };
+  }
+  connect();
+})();
+</script>
+</body>
+</html>

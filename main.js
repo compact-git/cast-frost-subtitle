@@ -4,11 +4,14 @@
  * あわせて、アプリが登録した「全体ホットキー」を Windows に登録し、押されたらアプリへ知らせる
  * (ゲーム中などブラウザが手前にない時でもエフェクトを出せるように)。
  * YouTube Live のチャットも、アプリの代わりにこのPCから読む(ブラウザからは直接読めないため)。
+ * OBS 用の「動画プレーヤー」(http://localhost:ポート/player)も出す。フリップの「Twitch 動画」を OBS で流すためのページ
+ * (Twitch の埋め込みは、パソコンに保存したファイルでは動かないので、このPCの中だけで見られるページとして出す)。
  */
 'use strict';
-const { app, BrowserWindow, Tray, Menu, screen, globalShortcut, ipcMain, dialog, shell, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, screen, globalShortcut, ipcMain, dialog, shell, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const { WebSocketServer } = require('ws');
 const youtube = require('./youtube');
 
@@ -46,7 +49,9 @@ function originOk(origin) {
 }
 
 // ---------- 窓 ----------
-let win = null, tray = null, wss = null, editing = false, clients = 0, lastPayload = null;
+let win = null, tray = null, wss = null, server = null, editing = false, clients = 0, lastPayload = null;
+const players = new Set();     // OBS の動画プレーヤー(/player)のつながり
+const vids = new Map();        // 流している最中の Twitch 動画(key → アプリから来た start のメッセージ)。後から開いたプレーヤーにも送る
 function targetDisplay() {
   const all = screen.getAllDisplays();
   return all.find(d => d.id === cfg.displayId) || screen.getPrimaryDisplay();
@@ -167,6 +172,9 @@ function buildMenu() {
     { label: `${NAME} v${VERSION}`, enabled: false },
     { label: clients ? `🟢 アプリと接続中(${clients})` : `⚪ アプリを待っています(ポート ${cfg.port})`, enabled: false },
     { type: 'separator' },
+    { label: `📺 OBS の動画プレーヤー:${players.size ? `🟢 OBS で開いています(${players.size})` : '⚪ OBS で開いていません'}${vids.size ? ` ・ ${vids.size} 件再生中` : ''}`, enabled: false },
+    { label: '📋 動画プレーヤーの URL をコピー(OBS のブラウザソース用)', click: () => clipboard.writeText(`http://localhost:${cfg.port}/player`) },
+    { type: 'separator' },
     { label: '字幕を表示する', type: 'checkbox', checked: cfg.visible !== false, click: m => setVisible(m.checked) },
     { label: `位置とサイズを調整する(${SHORTCUT_LABEL})`, type: 'checkbox', checked: editing, click: m => setEditing(m.checked) },
     { label: '画面いっぱいに戻す', click: resetBounds },
@@ -191,21 +199,48 @@ function buildMenu() {
   tray.setToolTip(clients ? `${NAME}:アプリと接続中` : `${NAME}:アプリを待っています`);
 }
 
-// ---------- WebSocket サーバー(127.0.0.1 だけで待つ) ----------
+// ---------- サーバー(127.0.0.1 だけで待つ):WebSocket と、OBS 用の動画プレーヤーのページ ----------
+const PAGES = { '/player': ['player.html', 'text/html; charset=utf-8'], '/twplay.js': ['twplay.js', 'text/javascript; charset=utf-8'] };
+function serveHttp(req, res) {
+  const u = String(req.url || '/').split('?')[0];
+  const pg = PAGES[u === '/player/' ? '/player' : u];
+  if (req.method !== 'GET' || !pg) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(`${NAME}: OBS の動画プレーヤーは http://localhost:${cfg.port}/player です`); return; }
+  fs.readFile(path.join(__dirname, pg[0]), (err, buf) => {
+    if (err) { res.writeHead(500); res.end('read error'); return; }
+    res.writeHead(200, { 'Content-Type': pg[1], 'Cache-Control': 'no-store' }); res.end(buf);
+  });
+}
+const toPlayers = obj => { const s = JSON.stringify(obj); players.forEach(p => { try { p.send(s); } catch (e) {} }); };
+function onVid(d) {
+  if (d.cmd === 'start' && d.key) { vids.set(d.key, d); if (!d.hold && d.durMs > 0) setTimeout(() => { if (vids.get(d.key) === d) vids.delete(d.key); }, d.durMs + 1000); }
+  else if (d.cmd === 'stop' && d.key) vids.delete(d.key);
+  else if (d.cmd === 'stopAll') vids.clear();
+  toPlayers(Object.assign({}, d, { app: EXE_ID, type: 'vid' }));
+  buildMenu();
+}
 function startServer() {
+  server = http.createServer(serveHttp);
   wss = new WebSocketServer({
-    host: '127.0.0.1', port: cfg.port, maxPayload: 4 * 1024 * 1024,
+    server, maxPayload: 4 * 1024 * 1024,
     verifyClient: (info, cb) => { const ok = originOk(info.origin); if (!ok) console.warn('拒否:', info.origin); cb(ok, 403, 'Forbidden origin'); },
   });
-  wss.on('connection', ws => {
+  wss.on('connection', (ws, req) => {
+    // OBS の動画プレーヤー(/player のページ)
+    if (String(req.url || '').startsWith('/player')) {
+      players.add(ws); buildMenu();
+      vids.forEach(d => { try { ws.send(JSON.stringify(Object.assign({}, d, { app: EXE_ID, type: 'vid' }))); } catch (e) {} });
+      ws.on('close', () => { players.delete(ws); buildMenu(); });
+      return;
+    }
     clients++; sendState(); buildMenu();
-    // 保存場所(表示用)と、ホットキーに対応していることをアプリに伝える
-    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube'], hotkeysOn: cfg.hotkeysOn !== false }));
+    // 保存場所(表示用)と、ホットキー・YouTube・動画プレーヤーに対応していることをアプリに伝える
+    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
     if (lastPayload && win) win.webContents.send('payload', lastPayload);
     ws.on('message', raw => {
       let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
       if (!d || d.app !== APP_ID) return;
       if (d.type === 'yt') { ytRequest(ws, d); return; }
+      if (d.type === 'vid') { onVid(d); return; }
       if (d.type === 'hotkeys') {
         const results = setHotkeys(d.keys);
         try { ws.send(JSON.stringify({ app: EXE_ID, type: 'hotkeys-result', results, hotkeysOn: cfg.hotkeysOn !== false })); } catch (e) {}
@@ -217,16 +252,17 @@ function startServer() {
     });
     ws.on('close', () => {
       clients = Math.max(0, clients - 1);
-      if (!clients) clearHotkeys();   // アプリを閉じたら、ほかのアプリのじゃまをしないようにホットキーを外す
+      if (!clients) { clearHotkeys(); vids.clear(); toPlayers({ app: EXE_ID, type: 'vid', cmd: 'stopAll' }); }   // アプリを閉じたら、ホットキーを外し、流している動画も止める
       sendState(); buildMenu();
     });
   });
-  wss.on('error', e => {
+  server.on('error', e => {
     if (e.code === 'EADDRINUSE') {
       dialog.showErrorBox(NAME, `ポート ${cfg.port} がほかのアプリで使われています。\n${NAME} がもう起動していないか確認してね。\n(ポートは トレイ →「設定ファイルを開く」で変えられます。アプリ側のポートも同じにしてね)`);
       app.quit();
     } else console.error(e);
   });
+  server.listen(cfg.port, '127.0.0.1');
 }
 
 // ---------- 起動 ----------
@@ -263,6 +299,6 @@ else {
     screen.on('display-removed', () => { if (!cfg.bounds && win) win.setBounds(fullBounds()); buildMenu(); });
     screen.on('display-added', buildMenu);
   });
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (wss) wss.close(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (wss) wss.close(); if (server) server.close(); });
   app.on('window-all-closed', () => app.quit());
 }

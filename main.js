@@ -210,6 +210,9 @@ function serveHttp(req, res) {
     res.writeHead(200, { 'Content-Type': pg[1], 'Cache-Control': 'no-store' }); res.end(buf);
   });
 }
+/** アプリ(プレーヤー以外のつながり)へ送る */
+const toApps = obj => { const s = JSON.stringify(obj); let n = 0; if (wss) wss.clients.forEach(c => { if (!players.has(c) && c.readyState === 1) { try { c.send(s); n++; } catch (e) {} } }); return n; };
+const playersChanged = () => { buildMenu(); toApps({ app: EXE_ID, type: 'players', n: players.size }); };
 const toPlayers = obj => { const s = JSON.stringify(obj); players.forEach(p => { try { p.send(s); } catch (e) {} }); };
 function onVid(d) {
   if (d.cmd === 'start' && d.key) { vids.set(d.key, d); if (!d.hold && d.durMs > 0) setTimeout(() => { if (vids.get(d.key) === d) vids.delete(d.key); }, d.durMs + 1000); }
@@ -227,30 +230,30 @@ function startServer() {
   wss.on('connection', (ws, req) => {
     // OBS の動画プレーヤー(/player のページ)
     if (String(req.url || '').startsWith('/player')) {
-      players.add(ws); buildMenu();
+      players.add(ws); playersChanged();
       // プレーヤーから:クリップの動画ファイルの URL がほしい → アプリ(Twitch の OAuth を持っている)に頼む
       ws.on('message', raw => {
         let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
         if (!d || d.type !== 'need-clip' || !d.rid) return;
         const s = JSON.stringify({ app: EXE_ID, type: 'need-clip', rid: String(d.rid).slice(0, 40), id: String(d.id || '').slice(0, 120), bid: String(d.bid || '').slice(0, 40) });
-        let sent = false;
-        wss.clients.forEach(c => { if (!players.has(c) && c.readyState === 1) { try { c.send(s); sent = true; } catch (e) {} } });
+        const sent = toApps(JSON.parse(s)) > 0;
         if (!sent) try { ws.send(JSON.stringify({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: null })); } catch (e) {}
       });
       vids.forEach(d => { try { ws.send(JSON.stringify(Object.assign({}, d, { app: EXE_ID, type: 'vid' }))); } catch (e) {} });
-      ws.on('close', () => { players.delete(ws); buildMenu(); });
+      ws.on('close', () => { players.delete(ws); playersChanged(); });
       return;
     }
     clients++; sendState(); buildMenu();
     // 保存場所(表示用)と、ホットキー・YouTube・動画プレーヤーに対応していることをアプリに伝える
-    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
+    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
     if (lastPayload && win) win.webContents.send('payload', lastPayload);
     ws.on('message', raw => {
       let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
       if (!d || d.app !== APP_ID) return;
       if (d.type === 'yt') { ytRequest(ws, d); return; }
       if (d.type === 'vid') { onVid(d); return; }
-      if (d.type === 'clip-url') { toPlayers({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: d.url || null }); return; }   // クリップの動画ファイルの URL(プレーヤーが頼んだもの)
+      if (d.type === 'clip-url') { toPlayers({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: d.url || null }); if (win) win.webContents.send('clip-url', { rid: d.rid, url: d.url || null }); return; }
+      if (d.type === 'fx') { if (win && d.m) win.webContents.send('fx', d.m); return; }   // 演出・フリップ(自分の画面の窓に出す)   // クリップの動画ファイルの URL(プレーヤーが頼んだもの)
       if (d.type === 'hotkeys') {
         const results = setHotkeys(d.keys);
         try { ws.send(JSON.stringify({ app: EXE_ID, type: 'hotkeys-result', results, hotkeysOn: cfg.hotkeysOn !== false })); } catch (e) {}
@@ -273,6 +276,8 @@ function startServer() {
     } else console.error(e);
   });
   server.listen(cfg.port, '127.0.0.1');
+  // OBS などで localhost が IPv6(::1)になっても届くように、::1 でも待つ(使えない PC では何もしない)
+  try { const s6 = http.createServer(serveHttp); s6.on('upgrade', (req, sock, head) => server.emit('upgrade', req, sock, head)); s6.on('error', () => {}); s6.listen(cfg.port, '::1'); } catch (e) {}
 }
 
 // ---------- 起動 ----------
@@ -306,6 +311,9 @@ else {
     startServer();
     if (!globalShortcut.register(SHORTCUT, () => setEditing(!editing))) console.warn('shortcut taken:', SHORTCUT);
     ipcMain.on('end-edit', () => setEditing(false));
+    // 字幕の窓の演出から:素材がほしい・クリップの動画ファイルの URL がほしい → アプリに頼む
+    ipcMain.on('fx-need', (_e, ids) => toApps({ app: EXE_ID, type: 'fx-need', ids: Array.isArray(ids) ? ids.slice(0, 50).map(String) : [] }));
+    ipcMain.on('need-clip', (_e, d) => { if (!d || !d.rid) return; if (!toApps({ app: EXE_ID, type: 'need-clip', rid: String(d.rid).slice(0, 40), id: String(d.id || '').slice(0, 120), bid: String(d.bid || '').slice(0, 40) }) && win) win.webContents.send('clip-url', { rid: d.rid, url: null }); });
     screen.on('display-removed', () => { if (!cfg.bounds && win) win.setBounds(fullBounds()); buildMenu(); });
     screen.on('display-added', buildMenu);
   });

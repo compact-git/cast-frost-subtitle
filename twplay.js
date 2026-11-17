@@ -10,7 +10,8 @@
  *   L.volume:音量(0〜1)
  *   opts:{ parent:[ドメイン], muted, volMode:'player'(動画の音量をプレーヤーで下げる)/'external'(OBS のミキサーで下げるので、プレーヤーは100%),
  *          resolveClip(it) → Promise<URL|null>:クリップの動画ファイル(mp4)の URL。もらえたら <video> で流す(音量を変えられ、自動再生の条件もない)。
- *          もらえない時(OAuth にクリップの権限がない など)は、Twitch の埋め込みで流す }
+ *          もらえない時(OAuth にクリップの権限がない など)は、Twitch の埋め込みで流す
+ *          noEmbed:true の時は埋め込みを使わない(動画ファイルにできないものは飛ばす。パソコンの中のファイルで開いた窓用) }
  */
 (function (root) {
   'use strict';
@@ -62,7 +63,7 @@
     const vol = Math.max(0, Math.min(1, Number(L.volume == null ? 0.6 : L.volume)));
     const muted = !!opts.muted;
     const next = makeQueue(items, L.order || 'expand');
-    let stopped = false, timer = 0, cur = null, playTok = 0;
+    let stopped = false, timer = 0, cur = null, playTok = 0, fails = 0;
     box.style.background = '#000';
     box.style.overflow = 'hidden';
 
@@ -102,7 +103,7 @@
           v.muted = muted; v.volume = muted ? 0 : (opts.volMode === 'external' ? 1 : vol);
           Object.assign(v.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'contain', background: '#000' });
           box.appendChild(v);
-          cur = { it, video: v };
+          cur = { it, video: v }; fails = 0;
           let done = false;
           const nextOnce = () => { if (done || stopped || !cur || cur.video !== v) return; done = true; playOne(); };
           v.addEventListener('ended', nextOnce);
@@ -111,6 +112,10 @@
           after((Number(it.dur) || 60) + 8, nextOnce);   // 念のため(ended が来ない時)
           return;
         }
+      }
+      if (opts.noEmbed) {   // 埋め込みは使えない:飛ばして次へ(全部だめなら止める)
+        if (++fails > items.length) { msg(opts.resolveClip ? '🎬 クリップの動画ファイルをもらえません(Twitch の OAuth を取り直してね)' : '🎬 流せるものがありません'); return; }
+        after(1, playOne); return;
       }
       if (it.k === 'clip') { embedClip(it); return; }
       function embedClip(it) {

@@ -87,9 +87,14 @@ Cast Frost Web のフリップの部品「📺 Twitch 動画」で、配信者�
 ## About (English)
 Cast Frost Subtitle is a small Windows helper for Cast Frost Web. It shows subtitles in a frameless, transparent, always-on-top, click-through window, and registers global hotkeys for on-stream effects on behalf of the web app.
 It also reads YouTube Live chat on behalf of the web app (browsers cannot read it directly), connecting from this PC straight to YouTube.
-It only communicates with Cast Frost Web on the same PC through a local WebSocket (127.0.0.1), and only accepts connections from allowed origins.
+It talks to Cast Frost Web on the same PC through a local WebSocket / HTTP server (127.0.0.1 / localhost only), and only accepts connections from allowed origins.
+Outbound connections are made directly from this PC, only when the web app asks for them:
+- YouTube (www.youtube.com): reading live chat and listing the channel's latest stream archives (no API key)
+- DeepL (api.deepl.com / api-free.deepl.com): translation, only when the user has chosen DeepL and entered their own API key (the key is not stored)
+- Twitch / YouTube embedded players: shown in the subtitle window and the OBS player page
+It does not send any data to the developer.
 - On every launch, it registers the `castfrost://` URL scheme for the current user (`HKCU\Software\Classes\castfrost`) so that Cast Frost Web can start it.
 - Settings are stored in `%APPDATA%\Cast Frost 字幕\config.json`.
 
 ## License
-MIT License(`LICENSE`)
+このアプリ自体も MIT ライセンスです(`LICENSE`、Copyright (c) 2026 compact)。

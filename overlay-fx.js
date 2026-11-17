@@ -43,8 +43,8 @@
     }
     if (d.hold) { relPending.delete(d.key); if (held.has(d.key)) return; }
     const host = fxt;   // 全部、字幕の上(出しっぱなしも)
-    // クリップは動画ファイルで流す(この窓はパソコンの中のファイルなので、Twitch の埋め込みは使えない)
-    const tw = { parent: ['localhost'], muted: !!d.muted, volMode: 'player', resolveClip, noEmbed: true, host: fxt };
+    // http://localhost で開いている時は Twitch の埋め込みも使える。パソコンの中のファイルで開いた時は、動画ファイルだけ
+    const tw = { parent: [location.hostname || 'localhost'], muted: !!d.muted, volMode: 'player', resolveClip, noEmbed: location.protocol === 'file:', host: fxt };
     const h = CFFx.play(host, v.effect, { assets: urlOf, vars: d.vars || {}, hold: !!d.hold, muted: !!d.muted, twitch: tw });
     if (d.hold) { if (relPending.has(d.key)) { relPending.delete(d.key); h.release(); } else held.set(d.key, h); } else if (d.manual) manual.add(h);
     playing.add(h); await h.done; playing.delete(h); manual.delete(h);

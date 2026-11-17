@@ -64,12 +64,19 @@ function createWindow() {
     transparent: true, frame: false, hasShadow: false, resizable: false, movable: false,
     skipTaskbar: true, focusable: false, alwaysOnTop: true, show: false, backgroundColor: '#00000000',
     title: NAME, icon: path.join(__dirname, 'build', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' },
   });
   win.setAlwaysOnTop(true, 'screen-saver');           // 全画面のゲームなどより手前に
   win.setVisibleOnAllWorkspaces(true);
   win.setIgnoreMouseEvents(true, { forward: true });  // クリックは後ろの窓へ通り抜ける
-  win.loadFile(path.join(__dirname, 'overlay.html'));
+  // http://localhost から開く(Twitch の埋め込みを使うため)。開けない時は、パソコンの中のファイルで開く
+  let tries = 0;
+  const open = () => win.loadURL(`http://localhost:${cfg.port}/overlay.html`).catch(() => {});
+  win.webContents.on('did-fail-load', (_e, code, _d, url, isMain) => {
+    if (!isMain || !/^http:\/\/localhost/.test(url || '')) return;   // 中の Twitch の枠などの失敗は無視
+    if (++tries <= 6) setTimeout(open, 500); else win.loadFile(path.join(__dirname, 'overlay.html'));
+  });
+  setTimeout(open, 200);
   win.once('ready-to-show', () => { if (cfg.visible !== false) win.showInactive(); sendState(); });
   const remember = () => { if (editing && win) { cfg.bounds = win.getBounds(); saveCfg(); } };
   win.on('moved', remember); win.on('resized', remember);
@@ -200,9 +207,29 @@ function buildMenu() {
 }
 
 // ---------- サーバー(127.0.0.1 だけで待つ):WebSocket と、OBS 用の動画プレーヤーのページ ----------
-const PAGES = { '/player': ['player.html', 'text/html; charset=utf-8'], '/twplay.js': ['twplay.js', 'text/javascript; charset=utf-8'] };
+const JS = 'text/javascript; charset=utf-8', HTML = 'text/html; charset=utf-8';
+const PAGES = { '/player': ['player.html', HTML], '/twplay.js': ['twplay.js', JS],
+  // 字幕の窓も http://localhost から開く(Twitch の埋め込みは、パソコンの中のファイルでは動かないため)
+  '/overlay.html': ['overlay.html', HTML], '/overlay.js': ['overlay.js', JS], '/overlay-fx.js': ['overlay-fx.js', JS], '/subrender.js': ['subrender.js', JS], '/fxengine.js': ['fxengine.js', JS] };
+// ---- OBS 用のページ(字幕・演出):中身はアプリが作って送ってくる(OBS の接続先・パスワード入り)。この PC の中だけで開ける ----
+const OBS_PAGES = ['sub', 'fx'];
+const obsPages = {};
+const obsDir = () => path.join(app.getPath('userData'), 'obs-pages');
+function loadObsPages() { OBS_PAGES.forEach(k => { try { obsPages[k] = fs.readFileSync(path.join(obsDir(), k + '.html'), 'utf8'); } catch (e) {} }); }
+function saveObsPages(pages) {
+  try { fs.mkdirSync(obsDir(), { recursive: true }); } catch (e) {}
+  OBS_PAGES.forEach(k => {
+    const h = pages && pages[k];
+    if (typeof h !== 'string' || h.length > 3 * 1024 * 1024 || !/^\s*<!DOCTYPE html>/i.test(h)) return;
+    obsPages[k] = h;
+    try { fs.writeFileSync(path.join(obsDir(), k + '.html'), h, 'utf8'); } catch (e) {}
+  });
+}
+const WAIT_PAGE = '<!DOCTYPE html><meta charset="utf-8"><body style="margin:0;background:transparent;font:700 16px sans-serif;color:#fff"><div style="position:fixed;left:10px;bottom:10px;background:rgba(20,10,40,.7);padding:4px 10px;border-radius:8px">Cast Frost:アプリを開くと表示されます</div><script>setTimeout(()=>location.reload(),3000)</script>';
 function serveHttp(req, res) {
   const u = String(req.url || '/').split('?')[0];
+  const om = u.match(/^\/obs\/(sub|fx)\/?$/);
+  if (om && req.method === 'GET') { res.writeHead(200, { 'Content-Type': HTML, 'Cache-Control': 'no-store' }); res.end(obsPages[om[1]] || WAIT_PAGE); return; }
   const pg = PAGES[u === '/player/' ? '/player' : u];
   if (req.method !== 'GET' || !pg) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(`${NAME}: OBS の動画プレーヤーは http://localhost:${cfg.port}/player です`); return; }
   fs.readFile(path.join(__dirname, pg[0]), (err, buf) => {
@@ -245,13 +272,14 @@ function startServer() {
     }
     clients++; sendState(); buildMenu();
     // 保存場所(表示用)と、ホットキー・YouTube・動画プレーヤーに対応していることをアプリに伝える
-    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
+    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx', 'obspages', 'overlay-http'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
     if (lastPayload && win) win.webContents.send('payload', lastPayload);
     ws.on('message', raw => {
       let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
       if (!d || d.app !== APP_ID) return;
       if (d.type === 'yt') { ytRequest(ws, d); return; }
       if (d.type === 'vid') { onVid(d); return; }
+      if (d.type === 'obs-pages') { saveObsPages(d.pages); try { ws.send(JSON.stringify({ app: EXE_ID, type: 'obs-pages-ok', have: OBS_PAGES.filter(k => obsPages[k]) })); } catch (e) {} return; }
       if (d.type === 'clip-url') { toPlayers({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: d.url || null }); if (win) win.webContents.send('clip-url', { rid: d.rid, url: d.url || null }); return; }
       if (d.type === 'fx') { if (win && d.m) win.webContents.send('fx', d.m); return; }   // 演出・フリップ(自分の画面の窓に出す)   // クリップの動画ファイルの URL(プレーヤーが頼んだもの)
       if (d.type === 'hotkeys') {
@@ -304,11 +332,12 @@ else {
   });
   app.whenReady().then(() => {
     loadCfg();
+    loadObsPages();
+    startServer();
     createWindow();
     tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'tray.png')));
     tray.on('click', () => tray.popUpContextMenu());
     buildMenu();
-    startServer();
     if (!globalShortcut.register(SHORTCUT, () => setEditing(!editing))) console.warn('shortcut taken:', SHORTCUT);
     ipcMain.on('end-edit', () => setEditing(false));
     // 字幕の窓の演出から:素材がほしい・クリップの動画ファイルの URL がほしい → アプリに頼む

@@ -159,6 +159,28 @@ async function ytRequest(ws, d) {
   finally { ytBusy--; }
 }
 
+// ---------- DeepL(アプリから頼まれて呼ぶ。Cloudflare の中継を使わないため) ----------
+const DEEPL_PATH = /^\/v2\/(translate|usage)$/;
+let deeplBusy = 0;
+async function deeplRequest(ws, d) {
+  const reqId = String(d.reqId || '').slice(0, 40);
+  const reply = o => { try { if (ws.readyState === 1) ws.send(JSON.stringify(Object.assign({ app: EXE_ID, type: 'res', reqId }, o))); } catch (e) {} };
+  const p = String(d.path || ''), key = String(d.key || '').trim();
+  if (!DEEPL_PATH.test(p)) return reply({ ok: false, error: { code: 'badop', message: 'unknown path' } });
+  if (!key || key.length > 200 || /[\r\n]/.test(key)) return reply({ ok: false, error: { code: 'nokey', message: 'DeepLのAPIキーがありません' } });
+  if (deeplBusy >= 8) return reply({ ok: false, error: { code: 'busy', message: '補助exeが混み合っています' } });
+  deeplBusy++;
+  try {
+    const base = key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+    const opt = { headers: { Authorization: 'DeepL-Auth-Key ' + key }, signal: AbortSignal.timeout(12000) };
+    if (d.body && p === '/v2/translate') { opt.method = 'POST'; opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(d.body); }
+    const r = await fetch(base + p, opt);
+    const json = await r.json().catch(() => ({}));
+    reply({ ok: true, data: { status: r.status, json } });   // DeepL のエラー(403・456 など)も status で返して、アプリ側で判断する
+  } catch (e) { reply({ ok: false, error: { code: 'failed', message: 'DeepLにつながりません: ' + String(e.message || e) } }); }
+  finally { deeplBusy--; }
+}
+
 function setHotkeysOn(on) {
   cfg.hotkeysOn = !!on; saveCfg();
   if (!on) clearHotkeys();
@@ -272,12 +294,13 @@ function startServer() {
     }
     clients++; sendState(); buildMenu();
     // 保存場所(表示用)と、ホットキー・YouTube・動画プレーヤーに対応していることをアプリに伝える
-    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx', 'obspages', 'overlay-http'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
+    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx', 'obspages', 'overlay-http', 'deepl'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
     if (lastPayload && win) win.webContents.send('payload', lastPayload);
     ws.on('message', raw => {
       let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
       if (!d || d.app !== APP_ID) return;
       if (d.type === 'yt') { ytRequest(ws, d); return; }
+      if (d.type === 'deepl') { deeplRequest(ws, d); return; }
       if (d.type === 'vid') { onVid(d); return; }
       if (d.type === 'obs-pages') { saveObsPages(d.pages); try { ws.send(JSON.stringify({ app: EXE_ID, type: 'obs-pages-ok', have: OBS_PAGES.filter(k => obsPages[k]) })); } catch (e) {} return; }
       if (d.type === 'clip-url') { toPlayers({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: d.url || null }); if (win) win.webContents.send('clip-url', { rid: d.rid, url: d.url || null }); return; }

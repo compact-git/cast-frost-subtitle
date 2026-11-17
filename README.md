@@ -45,6 +45,10 @@ Cast Frost Web のフリップの部品「📺 Twitch 動画」で、配信者�
 - YouTube の公開された仕組みではなく、チャット欄と同じものを読んでいます。YouTube 側の変更で読めなくなった時は、補助exeの更新で直します
 - 通信はこのPCから YouTube へ直接行います(Cloudflare などの中継は使いません)
 
+## DeepL の翻訳
+- Cast Frost Web の翻訳で DeepL を選んでいる時、補助exe とつながっていれば、補助exe が DeepL を呼びます(v0.4.6〜)
+- 通信はこのPCから DeepL へ直接行います(Cloudflare などの中継は使いません)。キーは保存しません
+
 ## 安全のための仕組み
 - 待ち受けるのはこのPCの中(127.0.0.1)だけです。ほかのPCからはつながりません
 - 接続してよいページを限定しています(初期値:`https://cast.rider.tokyo`、`https://*.pages.dev`、`http://localhost:*`、`http://127.0.0.1:*`)
@@ -67,6 +71,7 @@ Cast Frost Web のフリップの部品「📺 Twitch 動画」で、配信者�
 ## アプリとのやりとり(開発用メモ)
 - アプリ → exe:字幕 `{ app:'castfrost', v, rv, pipW, pipH, boxes }`、ホットキー一覧 `{ app:'castfrost', type:'hotkeys', keys:[{ id, accel, label }] }`
 - アプリ → exe:YouTube `{ app:'castfrost', type:'yt', reqId, op:'resolve'|'init'|'next', q | v | body }`
+- アプリ → exe:DeepL `{ app:'castfrost', type:'deepl', reqId, path:'/v2/translate'|'/v2/usage', key, body }`(返事の data は `{ status, json }`)
 - exe → アプリ:YouTube の返事 `{ type:'res', reqId, ok, data | error:{ code, status, message } }`
 - exe → アプリ:接続時 `{ app:'castfrost-exe', version, path, features:['subtitle','hotkeys','youtube'], hotkeysOn }`、登録結果 `{ type:'hotkeys-result', results:[{ id, accel, ok, reason }] }`(reason: invalid / duplicate / taken / off)、押された時 `{ type:'hotkey', id }`、再送のお願い `{ type:'hotkeys-request' }`
 

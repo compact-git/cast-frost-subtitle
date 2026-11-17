@@ -8,7 +8,9 @@
  *   L.order:'expand'(上位5本から、流しきるたびに 10・20・40…と広げて、その中からランダム)/ 'random' / 'inOrder'
  *   L.excerptMin:長い動画(アーカイブなど)の1本あたりの再生時間(分)。どこか適当な場所から、この長さだけ流す。0 = 頭から最後まで
  *   L.volume:音量(0〜1)
- *   opts:{ parent:[ドメイン], muted, volMode:'player'(動画の音量をプレーヤーで下げる)/'external'(OBS のミキサーで下げるので、プレーヤーは100%) }
+ *   opts:{ parent:[ドメイン], muted, volMode:'player'(動画の音量をプレーヤーで下げる)/'external'(OBS のミキサーで下げるので、プレーヤーは100%),
+ *          resolveClip(it) → Promise<URL|null>:クリップの動画ファイル(mp4)の URL。もらえたら <video> で流す(音量を変えられ、自動再生の条件もない)。
+ *          もらえない時(OAuth にクリップの権限がない など)は、Twitch の埋め込みで流す }
  */
 (function (root) {
   'use strict';
@@ -60,7 +62,7 @@
     const vol = Math.max(0, Math.min(1, Number(L.volume == null ? 0.6 : L.volume)));
     const muted = !!opts.muted;
     const next = makeQueue(items, L.order || 'expand');
-    let stopped = false, timer = 0, cur = null;
+    let stopped = false, timer = 0, cur = null, playTok = 0;
     box.style.background = '#000';
     box.style.overflow = 'hidden';
 
@@ -75,6 +77,7 @@
     const after = (sec, fn) => { win.clearTimeout(timer); timer = win.setTimeout(fn, Math.max(1, sec) * 1000); };
     function clear() {
       if (cur && cur.player && cur.player.pause) { try { cur.player.pause(); } catch (e) {} }
+      if (cur && cur.video) { try { cur.video.pause(); cur.video.removeAttribute('src'); cur.video.load(); } catch (e) {} }
       box.innerHTML = ''; cur = null;
     }
     function frame(src) {
@@ -87,12 +90,33 @@
     async function playOne() {
       if (stopped) return;
       const it = next(); if (!it) return;
+      const tok = ++playTok;
       clear();
-      if (it.k === 'clip') {
+      if (it.k === 'clip' && opts.resolveClip) {
+        let url = null;
+        try { url = await opts.resolveClip(it); } catch (e) {}
+        if (stopped || tok !== playTok) return;   // 待っている間に止められた・次へ進んだ
+        if (url) {
+          const v = doc.createElement('video');
+          v.src = url; v.autoplay = true; v.playsInline = true; v.preload = 'auto';
+          v.muted = muted; v.volume = muted ? 0 : (opts.volMode === 'external' ? 1 : vol);
+          Object.assign(v.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'contain', background: '#000' });
+          box.appendChild(v);
+          cur = { it, video: v };
+          let done = false;
+          const nextOnce = () => { if (done || stopped || !cur || cur.video !== v) return; done = true; playOne(); };
+          v.addEventListener('ended', nextOnce);
+          v.addEventListener('error', () => { if (cur && cur.video === v) { v.remove(); cur = null; embedClip(it); } });
+          const p = v.play(); if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });   // 音つきが止められたら、音なしで流す
+          after((Number(it.dur) || 60) + 8, nextOnce);   // 念のため(ended が来ない時)
+          return;
+        }
+      }
+      if (it.k === 'clip') { embedClip(it); return; }
+      function embedClip(it) {
         frame(`https://clips.twitch.tv/embed?clip=${encodeURIComponent(it.id)}&${pq}&autoplay=true&muted=${muted}&preload=auto`);
         cur = { it };
         after((Number(it.dur) || 30) + CLIP_PAD, playOne);
-        return;
       }
       // 動画:長い時は、どこか適当な場所から「1本あたりの再生時間」だけ流す
       const dur = Number(it.dur) || 0, ex = Math.max(0, Number(L.excerptMin) || 0) * 60;

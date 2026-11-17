@@ -2,19 +2,24 @@
 (function (root) {
   'use strict';
 
-  const BOX_IDS = ['stt', 'tr', 'cmt', 'raid'];
-  const BOX_LABEL = { stt: '聞き取り字幕', tr: '翻訳字幕', cmt: 'コメント翻訳字幕', raid: 'レイド紹介字幕' };
+  const BOX_IDS = ['stt', 'tr', 'cmt', 'raid', 'pop'];
+  const BOX_LABEL = { stt: '聞き取り字幕', tr: '翻訳字幕', cmt: 'コメント翻訳字幕', raid: 'レイド紹介字幕', pop: 'ポップアップ字幕' };
   const SAMPLE = {
     stt: [{ text: 'こんにちは!今日もゆるっと配信していきます' }],
     tr: [{ text: "Hello! I'll be streaming casually today too." }],
     cmt: [{ name: 'alice', text: 'Hi! Nice to meet you', orig: 'こんにちは!はじめまして' }, { name: 'bob', text: 'First time here', orig: '初見です' }],
+    pop: [{ name: 'ねこまる', text: 'ポップアップの見本です!' }],
     raid: [{ title: 'compactさんのＡＩ紹介', text: 'ゲームも雑談も全力で楽しむ、明るさが魅力の配信者さん!視聴者さんとの距離の近さと、丁寧なリアクションが人気の理由です。' }],
   };
 
   const CSS = `
 .yf-stage{position:relative;width:100%;height:100%;overflow:hidden}
 .yf-box{position:absolute;display:flex;flex-direction:column;box-sizing:border-box;padding:6px 10px;overflow:hidden;border-radius:12px}
-.yf-box.vb{justify-content:flex-end}.yf-box.vt{justify-content:flex-start}
+.yf-box.vb,.yf-box.vb .yf-flow{justify-content:flex-end}.yf-box.vt,.yf-box.vt .yf-flow{justify-content:flex-start}.yf-box.vm,.yf-box.vm .yf-flow{justify-content:center}
+.yf-pins{flex:none;display:flex;flex-direction:column}
+.yf-flow{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.yf-line.pin>span{font-weight:800}
+.yf-pinMark{margin-right:.25em}
 .yf-line{display:block;line-height:1.15;margin:.06em 0;word-break:break-word;animation:yfIn .25s ease-out}
 .yf-line>span{-webkit-box-decoration-break:clone;box-decoration-break:clone;padding:.04em .35em;border-radius:.3em}
 .yf-line.bub{margin:.3em 0 .45em .7em}
@@ -28,13 +33,13 @@
 .yf-emote{height:1.25em;width:auto;vertical-align:-0.28em;margin:0 .06em}
 .yf-tr2{display:inline-block;font-size:.78em;opacity:.95;margin-top:.1em}
 .yf-arrow{opacity:.75;margin:0 .35em}
-.yf-box[data-id=stt]{z-index:4}.yf-box[data-id=tr]{z-index:3}.yf-box[data-id=raid]{z-index:2}.yf-box[data-id=cmt]{z-index:1}
+.yf-box[data-id=pop]{z-index:5}.yf-box[data-id=stt]{z-index:4}.yf-box[data-id=tr]{z-index:3}.yf-box[data-id=raid]{z-index:2}.yf-box[data-id=cmt]{z-index:1}
 .yf-title{display:block;font-weight:800;font-size:.8em;opacity:.9;margin-bottom:.15em}
 .yf-line.live>span::after{content:"▍";opacity:.6;animation:yfBlink .8s steps(2) infinite}
 @keyframes yfBlink{50%{opacity:0}}
 @keyframes yfIn{from{opacity:0;transform:translateY(6px)}}
 .yf-edit .yf-box{--bx:#ffd23f;outline:3px dashed var(--bx);box-shadow:0 0 0 2px var(--halo,rgba(0,0,0,.5)),inset 0 0 0 2px var(--halo,rgba(0,0,0,.5));cursor:move}
-.yf-edit .yf-box[data-id=stt]{--bx:var(--bc-stt,#ffb020)} .yf-edit .yf-box[data-id=tr]{--bx:var(--bc-tr,#ff6b6b)} .yf-edit .yf-box[data-id=cmt]{--bx:var(--bc-cmt,#5bc0ff)}
+.yf-edit .yf-box[data-id=stt]{--bx:var(--bc-stt,#ffb020)} .yf-edit .yf-box[data-id=tr]{--bx:var(--bc-tr,#ff6b6b)} .yf-edit .yf-box[data-id=cmt]{--bx:var(--bc-cmt,#5bc0ff)} .yf-edit .yf-box[data-id=raid]{--bx:var(--bc-raid,#22d3ee)} .yf-edit .yf-box[data-id=pop]{--bx:var(--bc-pop,#c084fc)}
 .yf-edit .yf-box.sel{outline:4px solid var(--bx)}
 .yf-edit .yf-box .yf-tag{text-shadow:none;z-index:2;position:absolute;left:4px;top:2px;font:800 11px sans-serif;background:var(--bx);color:#2b1d4a;padding:1px 6px;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px var(--halo,rgba(0,0,0,.5))}
 .yf-edit .yf-box .yf-rs{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;
@@ -91,8 +96,9 @@
       const c = b.cfg;
       el.classList.toggle('off', !visible);
       el.classList.toggle('sel', opts.sel === id);
-      el.classList.toggle('vb', c.valign !== 'top');
+      el.classList.toggle('vb', c.valign !== 'top' && c.valign !== 'middle');
       el.classList.toggle('vt', c.valign === 'top');
+      el.classList.toggle('vm', c.valign === 'middle');
       el.classList.toggle('ar', c.align === 'right');
       Object.assign(el.style, {
         left: c.x + '%', top: c.y + '%', width: c.w + '%', height: c.h + '%',
@@ -105,7 +111,8 @@
         border: c.frame ? `3px solid ${c.frameColor}` : '3px solid transparent',
       });
       let lines = (b.lines || []).slice(-Math.max(1, c.maxLines || 2));
-      if (opts.edit && !lines.length) lines = SAMPLE[id];
+      let pins = id === 'cmt' ? (b.pins || []).slice(-Math.max(0, c.pinMax == null ? 3 : c.pinMax)) : [];
+      if (opts.edit && !lines.length) { lines = SAMPLE[id]; if (id === 'cmt' && !pins.length && c.pinMax !== 0) pins = [{ id: 'sample-pin', name: 'ねこまる', text: 'ピン留めの見本です' }]; }
       const seen = new Set((el.dataset.keys || '').split('|'));
       el.innerHTML = '';
       const keys = [];
@@ -114,21 +121,23 @@
         const rs = doc.createElement('div'); rs.className = 'yf-rs';
         el.append(tag, rs);
       }
-      for (const ln of lines) {
+      const bub = (id === 'cmt' || id === 'raid' || id === 'pop') && c.band && c.bandShape === 'bubble';   // コメントごとのセリフ枠
+      const makeRow = (ln, pin) => {
         const row = doc.createElement('div');
-        const k = String(ln.id != null ? ln.id : ln.text);
+        const k = (pin ? 'p:' : '') + String(ln.id != null ? ln.id : ln.text);
         keys.push(k);
-        const bub = (id === 'cmt' || id === 'raid') && c.band && c.bandShape === 'bubble';   // コメントごとのセリフ枠
-        row.className = 'yf-line' + (ln.interim ? ' interim' : '') + (seen.has(k) ? ' old' : '') + (bub ? ' bub' : '') + (ln.live ? ' live' : '');
+        row.className = 'yf-line' + (ln.interim ? ' interim' : '') + (seen.has(k) ? ' old' : '') + (bub ? ' bub' : '') + (ln.live ? ' live' : '') + (pin ? ' pin' : '');
         const span = doc.createElement('span');
-        if (c.band) span.style.background = hexA(c.bandColor, c.bandA);
-        if (bub) { span.className = 'yf-bubble'; span.style.setProperty('--bub', hexA(c.bandColor, c.bandA)); }
+        const bandCol = pin ? (c.pinColor || '#ffe066') : c.bandColor;
+        if (c.band || pin) span.style.background = hexA(bandCol, pin ? Math.max(0.85, Number(c.bandA) || 0) : c.bandA);
+        if (bub) { span.className = 'yf-bubble'; span.style.setProperty('--bub', hexA(bandCol, pin ? Math.max(0.85, Number(c.bandA) || 0) : c.bandA)); }
+        if (pin) { const pm = doc.createElement('span'); pm.className = 'yf-pinMark'; pm.textContent = '📌'; span.appendChild(pm); if (c.pinText) span.style.color = c.pinText; }
         if (ln.title) { const tt = doc.createElement('span'); tt.className = 'yf-title'; tt.textContent = ln.title; span.appendChild(tt); }
         if (ln.name && c.showName) {
           const n = doc.createElement('span'); n.className = 'yf-name'; n.textContent = ln.name;
           span.appendChild(n);
         }
-        const mode = id === 'cmt' ? (c.cmtShow || 'trans') : 'trans';
+        const mode = id === 'cmt' && !pin ? (c.cmtShow || 'trans') : 'trans';
         if (mode === 'both' && (ln.orig || ln.origParts)) {
           addParts(doc, span, ln.origParts, ln.orig);
           if (c.cmtBoth === 'arrow') {
@@ -142,8 +151,16 @@
           span.appendChild(doc.createTextNode(ln.orig));     // 見本は原文で表示
         } else addParts(doc, span, ln.parts, ln.text);
         row.appendChild(span);
-        el.appendChild(row);
-      }
+        return row;
+      };
+      if (pins.length) {
+        // ピン留めは枠のいちばん上に、ピンした順に上から。下の残りの場所にふだんのコメントが流れる
+        const pw = doc.createElement('div'); pw.className = 'yf-pins';
+        pins.forEach(p => pw.appendChild(makeRow(p, true)));
+        const flow = doc.createElement('div'); flow.className = 'yf-flow';
+        lines.forEach(ln => flow.appendChild(makeRow(ln, false)));
+        el.append(pw, flow);
+      } else lines.forEach(ln => el.appendChild(makeRow(ln, false)));
       el.dataset.keys = keys.join('|');
     }
   }

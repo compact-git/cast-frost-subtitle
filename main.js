@@ -228,6 +228,15 @@ function startServer() {
     // OBS の動画プレーヤー(/player のページ)
     if (String(req.url || '').startsWith('/player')) {
       players.add(ws); buildMenu();
+      // プレーヤーから:クリップの動画ファイルの URL がほしい → アプリ(Twitch の OAuth を持っている)に頼む
+      ws.on('message', raw => {
+        let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }
+        if (!d || d.type !== 'need-clip' || !d.rid) return;
+        const s = JSON.stringify({ app: EXE_ID, type: 'need-clip', rid: String(d.rid).slice(0, 40), id: String(d.id || '').slice(0, 120), bid: String(d.bid || '').slice(0, 40) });
+        let sent = false;
+        wss.clients.forEach(c => { if (!players.has(c) && c.readyState === 1) { try { c.send(s); sent = true; } catch (e) {} } });
+        if (!sent) try { ws.send(JSON.stringify({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: null })); } catch (e) {}
+      });
       vids.forEach(d => { try { ws.send(JSON.stringify(Object.assign({}, d, { app: EXE_ID, type: 'vid' }))); } catch (e) {} });
       ws.on('close', () => { players.delete(ws); buildMenu(); });
       return;
@@ -241,6 +250,7 @@ function startServer() {
       if (!d || d.app !== APP_ID) return;
       if (d.type === 'yt') { ytRequest(ws, d); return; }
       if (d.type === 'vid') { onVid(d); return; }
+      if (d.type === 'clip-url') { toPlayers({ app: EXE_ID, type: 'clip-url', rid: d.rid, url: d.url || null }); return; }   // クリップの動画ファイルの URL(プレーヤーが頼んだもの)
       if (d.type === 'hotkeys') {
         const results = setHotkeys(d.keys);
         try { ws.send(JSON.stringify({ app: EXE_ID, type: 'hotkeys-result', results, hotkeysOn: cfg.hotkeysOn !== false })); } catch (e) {}

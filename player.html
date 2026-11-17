@@ -45,7 +45,8 @@
       part.t = setTimeout(() => {   // 「始まる(秒)」
         document.body.appendChild(d);
         // 音量は OBS のミキサー(アプリが合わせる)で下げるので、プレーヤーは 100%
-        part.run = CFTw.run(d, L, { parent: [location.hostname || 'localhost'], volMode: 'external' });
+        // クリップは、動画ファイル(mp4)の URL をアプリに頼んで <video> で流す(Twitch の埋め込みは OBS の中で自動再生されないことがあるため)
+        part.run = CFTw.run(d, L, { parent: [location.hostname || 'localhost'], volMode: 'external', resolveClip });
       }, Math.max(0, Number(L.start) || 0) * 1000);
       parts.push(part);
     }
@@ -60,13 +61,27 @@
   }
   function stopAll() { [...active.keys()].forEach(k => stop(k)); }
 
+  let wsNow = null, ridN = 0;
+  const pend = new Map();
+  /** クリップの動画ファイルの URL を、補助exe → アプリ(Twitch の OAuth)に頼む。もらえなければ null(埋め込みで流す) */
+  function resolveClip(it) {
+    return new Promise(res => {
+      if (!wsNow || wsNow.readyState !== 1) { res(null); return; }
+      const rid = 'r' + (++ridN) + '_' + Date.now();
+      const t = setTimeout(() => { pend.delete(rid); res(null); }, 6000);
+      pend.set(rid, url => { clearTimeout(t); res(url || null); });
+      wsNow.send(JSON.stringify({ type: 'need-clip', rid, id: it.id, bid: it.bid || '' }));
+    });
+  }
   let retry = 0;
   function connect() {
     let ws;
     try { ws = new WebSocket(`ws://${location.host}/player-ws`); } catch (e) { setTimeout(connect, 3000); return; }
+    wsNow = ws;
     ws.onopen = () => { retry = 0; say('接続OK(フリップのボタンを待っています)'); };
     ws.onmessage = ev => {
       let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      if (d && d.type === 'clip-url') { const f = pend.get(d.rid); if (f) { pend.delete(d.rid); f(d.url); } return; }
       if (!d || d.type !== 'vid') return;
       if (d.cmd === 'start') { start(d); say('再生中 🎬'); }
       else if (d.cmd === 'stop') stop(d.key);

@@ -20,7 +20,7 @@
     const boxes = {};
     for (const id of YFSub.BOX_IDS) {
       const b = p.boxes && p.boxes[id];
-      if (b) boxes[id] = { cfg: b.cfg, lines: b.lines || [] };
+      if (b) boxes[id] = { cfg: b.cfg, lines: b.lines || [], pins: b.pins || [] };   // pins:コメント翻訳字幕のいちばん上の 📌 ピン留め
     }
     YFSub.render(stage, boxes, { onlyOutput: 'exe' });
   }

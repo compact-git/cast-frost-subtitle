@@ -145,7 +145,7 @@ function fireHotkey(id) {
   if (wss) for (const c of wss.clients) { if (c.readyState === 1) { try { c.send(msg); } catch (e) {} } }
 }
 // ---------- YouTube Live のチャット(アプリから頼まれて読む) ----------
-const YT_OPS = { resolve: d => youtube.resolve(d.q), init: d => youtube.init(d.v), next: d => youtube.next(d.body || {}) };
+const YT_OPS = { resolve: d => youtube.resolve(d.q), init: d => youtube.init(d.v), next: d => youtube.next(d.body || {}), latest: d => youtube.latest(d.q, d.n) };
 let ytBusy = 0;
 async function ytRequest(ws, d) {
   const reqId = String(d.reqId || '').slice(0, 40);
@@ -294,7 +294,7 @@ function startServer() {
     }
     clients++; sendState(); buildMenu();
     // 保存場所(表示用)と、ホットキー・YouTube・動画プレーヤーに対応していることをアプリに伝える
-    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx', 'obspages', 'overlay-http', 'deepl'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
+    ws.send(JSON.stringify({ app: EXE_ID, version: VERSION, path: EXE_PATH, features: ['subtitle', 'hotkeys', 'youtube', 'player', 'fx', 'obspages', 'overlay-http', 'deepl', 'ytlatest'], hotkeysOn: cfg.hotkeysOn !== false, playerUrl: `http://localhost:${cfg.port}/player`, players: players.size }));
     if (lastPayload && win) win.webContents.send('payload', lastPayload);
     ws.on('message', raw => {
       let d; try { d = JSON.parse(String(raw)); } catch (e) { return; }

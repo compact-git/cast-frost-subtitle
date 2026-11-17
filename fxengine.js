@@ -11,7 +11,7 @@
   const ANIM_OUT = ['none', 'fade', 'pop', 'zoom', 'slideUp', 'slideDown', 'slideLeft', 'slideRight', 'drop', 'spin'];
   const LOOPS = ['none', 'shake', 'bounce', 'pulse', 'spin', 'float', 'swing', 'rainbow', 'ssBounce', 'ssDrift', 'ssTickerH', 'ssTickerV', 'ssCircle', 'ssEight', 'ssEdge'];
   const LAYER_TYPES = ['text', 'image', 'video', 'sound', 'particles', 'flash', 'shake', 'board', 'twitch'];
-  const TW_SRC = ['clips', 'videos', 'list'], TW_PERIOD = ['week', 'month', 'year', 'all'], TW_VTYPE = ['all', 'archive', 'highlight', 'upload'], TW_ORDER = ['expand', 'random', 'inOrder'];
+  const TW_SRC = ['clips', 'videos', 'list', 'ytLatest'], TW_PERIOD = ['week', 'month', 'year', 'all'], TW_VTYPE = ['all', 'archive', 'highlight', 'upload'], TW_ORDER = ['expand', 'random', 'inOrder'];
   const PLATES = ['solid', 'grad', 'none'];
   const PARTICLE_MODES = ['confetti', 'rain', 'burst', 'float', 'snow'];
   const VARS = ['name', 'num', 'unit', 'amount', 'currency', 'message', 'count', 'months', 'tier', 'reward', 'viewers', 'level', 'kind'];
@@ -51,10 +51,10 @@
       size: num(l.size, 1, 300, 50), aspect: num(l.aspect, 0.1, 12, 16 / 9), textPct: num(l.textPct, 10, 100, 70),
     });
     if (type === 'shake') Object.assign(o, { power: num(l.power, 1, 80, 18) });
-    // 🎬 Twitch 動画(フリップ用):配信者自身のクリップ・動画を次々に流す。流すものの一覧(items)はアプリが再生の直前に Twitch から取ってくる
+    // 🎬 Twitch・YouTube 動画(フリップ用):配信者自身のクリップ・動画(YouTube は最新のアーカイブ)を次々に流す。流すものの一覧(items)はアプリが再生の直前に Twitch から取ってくる
     if (type === 'twitch') Object.assign(o, {
       src: oneOf(l.src, TW_SRC, 'clips'), period: oneOf(l.period, TW_PERIOD, 'all'), vtype: oneOf(l.vtype, TW_VTYPE, 'all'), urls: str(l.urls, 2000, ''),
-      order: oneOf(l.order, TW_ORDER, 'expand'), excerptMin: num(l.excerptMin, 0, 600, 0.5), volume: num(l.volume, 0, 1, 0.6), size: num(l.size, 5, 100, 60),
+      ytCount: Math.round(num(l.ytCount, 1, 30, 1)), order: oneOf(l.order, TW_ORDER, 'expand'), excerptMin: num(l.excerptMin, 0, 600, 0.5), volume: num(l.volume, 0, 1, 0.6), size: num(l.size, 5, 100, 60),
     });
     if ((type === 'video' || type === 'sound') && !o.asset) errors.push(`${i + 1}番目の部品(${type === 'video' ? '動画' : '音'})の素材が選ばれていません`);
     return o;
@@ -335,7 +335,7 @@
         }
         else {
           Object.assign(box.style, { background: 'repeating-linear-gradient(135deg,#2a1f4d 0 24px,#1f1740 24px 48px)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: '800 ' + Math.max(18, L.size / 100 * 64) + 'px sans-serif', textAlign: 'center' });
-          box.textContent = '🎬 Twitch のクリップ・動画(ここに流れます)';
+          box.textContent = L.src === 'ytLatest' ? '▶ YouTube のアーカイブ(ここに流れます)' : '🎬 Twitch のクリップ・動画(ここに流れます)';
         }
       }
       outer.style.opacity = '0';

@@ -4,7 +4,8 @@
  * Twitch の埋め込みは、表示するページのドメイン(parent)が必要なので、パソコンに保存したファイル(file://)では使えない。
  *
  * CFTw.run(box, L, opts) → { stop() }
- *   L.items:[{ k:'clip', id, dur, title } | { k:'video', id, dur, title }](アプリが Twitch API から作って渡す)
+ *   L.items:[{ k:'clip', id, dur, title } | { k:'video', id, dur, title } | { k:'yt', id, dur, title }]
+ *     (Twitch はアプリが Twitch API から、YouTube の最新アーカイブ(k:'yt')は補助exe がチャンネルのページから作って渡す)
  *   L.order:'expand'(上位5本から、流しきるたびに 10・20・40…と広げて、その中からランダム)/ 'random' / 'inOrder'
  *   L.excerptMin:長い動画(アーカイブなど)の1本あたりの再生時間(分)。どこか適当な場所から、この長さだけ流す。0 = 頭から最後まで
  *   L.volume:音量(0〜1)
@@ -73,10 +74,11 @@
       Object.assign(p.style, { position: 'absolute', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: '700 28px sans-serif', textAlign: 'center', padding: '5%' });
       p.textContent = text; box.appendChild(p);
     };
-    if (!items.length) { msg(L._err || '🎬 流せる Twitch の動画がありません'); return { stop() {} }; }
+    if (!items.length) { msg(L._err || '🎬 流せる動画がありません'); return { stop() {} }; }
 
     const after = (sec, fn) => { win.clearTimeout(timer); timer = win.setTimeout(fn, Math.max(1, sec) * 1000); };
     function clear() {
+      if (cur && cur.ytOff) { try { cur.ytOff(); } catch (e) {} }
       if (cur && cur.player && cur.player.pause) { try { cur.player.pause(); } catch (e) {} }
       if (cur && cur.video) { try { cur.video.pause(); cur.video.removeAttribute('src'); cur.video.load(); } catch (e) {} }
       box.innerHTML = ''; cur = null;
@@ -130,16 +132,14 @@
         after(1, playOne); return;
       }
       if (it.k === 'clip') { embedClip(it); return; }
+      if (it.k === 'yt') { playYt(it); return; }
       function embedClip(it) {
         frame(`https://clips.twitch.tv/embed?clip=${encodeURIComponent(it.id)}&${pq}&autoplay=true&muted=${muted}&preload=auto`);
         cur = { it };
         after((Number(it.dur) || 30) + CLIP_PAD, playOne);
       }
       // 動画:長い時は、どこか適当な場所から「1本あたりの再生時間」だけ流す
-      const dur = Number(it.dur) || 0, ex = Math.max(0, Number(L.excerptMin) || 0) * 60;
-      let start = 0, len = dur || 600;
-      if (ex > 0 && dur > ex + 20) { start = Math.floor(dur * 0.05 + Math.random() * Math.max(1, dur * 0.9 - ex)); len = ex; }
-      else if (ex > 0) len = Math.min(ex, dur || ex);
+      const { start, len } = excerpt(Number(it.dur) || 0);
       const holder = doc.createElement('div'); holder.id = 'cftw' + Math.random().toString(36).slice(2, 8);
       Object.assign(holder.style, { position: 'absolute', inset: '0' }); box.appendChild(holder);
       cur = { it };
@@ -165,6 +165,54 @@
         holder.remove(); frame(iframeUrl);
       }
       after(len + 4, playOne);   // 広告や読み込みの分、少し長めに
+    }
+    /** 長い動画の、どこから何秒流すか(1本あたりの再生時間) */
+    function excerpt(dur) {
+      const ex = Math.max(0, Number(L.excerptMin) || 0) * 60;
+      let start = 0, len = dur || 600;
+      if (ex > 0 && dur > ex + 20) { start = Math.floor(dur * 0.05 + Math.random() * Math.max(1, dur * 0.9 - ex)); len = ex; }
+      else if (ex > 0) len = Math.min(ex, dur || ex);
+      return { start, len };
+    }
+    /**
+     * ▶ YouTube のアーカイブ:YouTube のふつうの埋め込み(APIキーなし)。音量・終わり・エラーは、埋め込みとのメッセージ(enablejsapi)でやりとりする。
+     * 埋め込みが禁止の動画・削除された動画は、エラーが届いたら次へ
+     */
+    function playYt(it) {
+      const { start, len } = excerpt(Number(it.dur) || 0);
+      const org = (win.location.origin && win.location.origin !== 'null') ? win.location.origin : ((root.location && root.location.origin) || '');
+      const pv = Math.round((opts.volMode === 'external' ? 1 : vol) * 100);
+      const f = frame(`https://www.youtube.com/embed/${encodeURIComponent(it.id)}?autoplay=1&mute=${muted ? 1 : 0}&start=${start}&controls=0&rel=0&playsinline=1&iv_load_policy=3&enablejsapi=1${org ? '&origin=' + encodeURIComponent(org) : ''}`);
+      const me = { it, frame: f }; cur = me;
+      const send = (func, args) => { try { f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args: args || [], id: 1, channel: 'widget' }), 'https://www.youtube.com'); } catch (e) {} };
+      let ready = false, playing = false, btn = null;
+      const onMsg = ev => {
+        if (cur !== me || ev.source !== f.contentWindow || !/^https:\/\/www\.youtube\.com$/.test(ev.origin)) return;
+        let d; try { d = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch (e) { return; }
+        if (!d || !d.event) return;
+        if (d.event === 'onReady' && !ready) { ready = true; if (muted) send('mute'); else { send('unMute'); send('setVolume', [pv]); } send('playVideo'); }
+        const st = d.event === 'onStateChange' ? d.info : (d.event === 'infoDelivery' && d.info && d.info.playerState != null ? d.info.playerState : null);
+        if (st === 1) { playing = true; fails = 0; }
+        if (st === 0) playOne();   // 最後まで流れた
+        if (d.event === 'onError') { if (++fails > items.length) { msg('▶ YouTube のアーカイブを流せません(埋め込みが禁止されているかも)'); stopped = true; return; } playOne(); }
+      };
+      win.addEventListener('message', onMsg);
+      me.ytOff = () => win.removeEventListener('message', onMsg);
+      // 埋め込みが読み込めたら「聞いているよ」を送る(返事が来るまで何回か)
+      let tries = 0;
+      const listen = () => { if (cur !== me || ready || tries++ > 20) return; try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), 'https://www.youtube.com'); } catch (e) {} win.setTimeout(listen, 500); };
+      f.addEventListener('load', listen);
+      // 音つきの自動再生が止められた時(小窓をまだ押していない時など):音なしで流して「音を出す」ボタンを出す
+      if (!muted) win.setTimeout(() => {
+        if (cur !== me || playing || !ready) return;
+        send('mute'); send('playVideo');
+        btn = doc.createElement('button');
+        btn.type = 'button'; btn.textContent = '🔊 クリックで音を出す';
+        Object.assign(btn.style, { position: 'absolute', right: '10px', bottom: '10px', zIndex: '3', font: '800 16px sans-serif', padding: '8px 14px', borderRadius: '10px', border: '2px solid #fff', background: 'rgba(20,10,40,.85)', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' });
+        btn.onclick = ev => { ev.stopPropagation(); send('unMute'); send('setVolume', [pv]); send('playVideo'); btn.remove(); };
+        box.appendChild(btn);
+      }, 4000);
+      after(len + 4, playOne);
     }
     playOne();
     return {

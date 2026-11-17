@@ -166,4 +166,66 @@ function ytItem(it) {
   return null;
 }
 
-module.exports = { resolve: ytResolve, init: ytInit, next: ytNext };
+// ---------- チャンネルの最新のアーカイブ(ライブのタブ)----------
+/** "1:02:03" / "12:34" → 秒。形が違えば 0 */
+function ytClock(t) {
+  const m = String(t || '').trim().match(/^(\d+):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return 0;
+  return m[3] != null ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : Number(m[1]) * 60 + Number(m[2]);
+}
+/** ライブのタブの1本を { id, title, dur } に。配信中・予定・メンバー限定は null */
+function ytArchiveOf(o) {
+  let members = false;
+  (function w(x) { if (!x || typeof x !== 'object' || members) return; if (x.badgeViewModel && /MEMBERS/.test(x.badgeViewModel.badgeStyle || '')) members = true; if (x.metadataBadgeRenderer && /MEMBERS/.test(x.metadataBadgeRenderer.style || '')) members = true; for (const k in x) w(x[k]); })(o);
+  if (members) return null;
+  if (o.lockupViewModel) {
+    const lv = o.lockupViewModel;
+    if (lv.contentType && lv.contentType !== 'LOCKUP_CONTENT_TYPE_VIDEO') return null;
+    let dur = 0;
+    (function w(x) { if (!x || typeof x !== 'object' || dur) return; if (x.thumbnailBadgeViewModel) { const b = x.thumbnailBadgeViewModel; if (!/LIVE/.test(b.badgeStyle || '')) dur = ytClock(b.text); return; } for (const k in x) w(x[k]); })(lv.contentImage);
+    const m = lv.metadata && lv.metadata.lockupMetadataViewModel;
+    const title = (m && m.title && m.title.content) || '';
+    return lv.contentId && dur ? { id: lv.contentId, title, dur } : null;
+  }
+  if (o.videoRenderer || o.gridVideoRenderer) {   // 前の形(念のため)
+    const v = o.videoRenderer || o.gridVideoRenderer;
+    const dur = ytClock(ytText(v.lengthText));
+    return v.videoId && dur ? { id: v.videoId, title: ytText(v.title), dur } : null;
+  }
+  return null;
+}
+/**
+ * チャンネルのライブのタブ(/streams)から、終わった配信(アーカイブ)を新しい順に n 本まで。
+ * q:@ハンドル・チャンネルのURL・UC…、または配信(動画)のURL(その動画のチャンネルを使う)
+ */
+async function ytLatest(q, n) {
+  q = String(q || '').trim();
+  if (!q) throw yerr('empty', '📺 画面タブで、YouTube のチャンネル(@ハンドル)か配信のURLを入れてね');
+  n = Math.max(1, Math.min(30, Number(n) || 1));
+  let path = ytChannelPath(q);
+  if (!path) {
+    const vid = ytVideoId(q);
+    if (!vid) throw yerr('badinput', 'チャンネル(@ハンドル)か配信のURLの形ではないみたい');
+    const w = await ytFetchText('https://www.youtube.com/watch?v=' + vid);
+    const uc = (w.match(/"externalChannelId":"(UC[\w-]{22})"/) || w.match(/"channelId":"(UC[\w-]{22})"/) || [])[1];
+    if (!uc) throw yerr('notfound', 'その配信のチャンネルがわかりません');
+    path = 'channel/' + uc;
+  }
+  const html = await ytFetchText('https://www.youtube.com/' + encodeURI(path) + '/streams');
+  const data = ytJsonAfter(html, 'ytInitialData');
+  if (!data) throw yerr('parse', 'YouTube のページを読み取れませんでした(YouTube の作りが変わったかも)', 502);
+  const items = [], seen = new Set();
+  (function walk(x) {
+    if (!x || typeof x !== 'object' || items.length >= n) return;
+    if (x.lockupViewModel || x.videoRenderer || x.gridVideoRenderer) {
+      const it = ytArchiveOf(x);
+      if (it && !seen.has(it.id)) { seen.add(it.id); items.push(it); }
+      return;
+    }
+    for (const k in x) walk(x[k]);
+  })(data);
+  const channel = decodeHtml((html.match(/<meta property="og:title" content="([^"]*)"/) || [])[1] || '');
+  return { channel, items };
+}
+
+module.exports = { resolve: ytResolve, init: ytInit, next: ytNext, latest: ytLatest, _archiveOf: ytArchiveOf };

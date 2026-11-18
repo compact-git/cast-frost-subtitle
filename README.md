@@ -73,6 +73,7 @@ Cast Frost Web のフリップの部品「📺 Twitch 動画」で、配信者�
 - アプリ → exe:字幕 `{ app:'castfrost', v, rv, pipW, pipH, boxes }`、ホットキー一覧 `{ app:'castfrost', type:'hotkeys', keys:[{ id, accel, label }] }`
 - アプリ → exe:YouTube `{ app:'castfrost', type:'yt', reqId, op:'resolve'|'init'|'next', q | v | body }`
 - アプリ → exe:YouTube の最新アーカイブ `{ type:'yt', op:'latest', q, n }` → data `{ channel, items:[{ id, title, dur }] }`
+- アプリ → exe:YouTube の動画の情報 `{ type:'yt', op:'vinfo', v }` → data `{ videoId, start, end, live, channelId, title }`(start・end はミリ秒。アーカイブの時間へのリンク用)
 - アプリ → exe:DeepL `{ app:'castfrost', type:'deepl', reqId, path:'/v2/translate'|'/v2/usage', key, body }`(返事の data は `{ status, json }`)
 - exe → アプリ:YouTube の返事 `{ type:'res', reqId, ok, data | error:{ code, status, message } }`
 - exe → アプリ:接続時 `{ app:'castfrost-exe', version, path, features:['subtitle','hotkeys','youtube'], hotkeysOn }`、登録結果 `{ type:'hotkeys-result', results:[{ id, accel, ok, reason }] }`(reason: invalid / duplicate / taken / off)、押された時 `{ type:'hotkey', id }`、再送のお願い `{ type:'hotkeys-request' }`

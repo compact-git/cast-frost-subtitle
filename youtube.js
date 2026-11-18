@@ -44,7 +44,22 @@ async function ytResolve(q) {
   const live = /"isLiveNow":true/.test(html) || /"isLive":true/.test(html);
   const upcoming = !live && (/"isUpcoming":true/.test(html) || /"upcomingEventData"/.test(html));
   const title = (html.match(/<meta name="title" content="([^"]*)"/) || [])[1] || '';
-  return { videoId: canon[1], live, upcoming, title: decodeHtml(title), channel: decodeHtml(channel) };
+  return { videoId: canon[1], live, upcoming, title: decodeHtml(title), channel: decodeHtml(channel), start: ytStartOf(html) };
+}
+/** 配信の開始時刻(ミリ秒)。watch のページの liveBroadcastDetails.startTimestamp。無ければ 0 */
+function ytStartOf(html) {
+  const m = String(html || '').match(/"liveBroadcastDetails":\{[^}]*"startTimestamp":"([^"]+)"/) || String(html || '').match(/"startTimestamp":"([^"]+)"/);
+  const t = m ? Date.parse(m[1]) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+/** 動画(配信)の情報:アーカイブの「その時間」へのリンクを作るための開始時刻など */
+async function ytVinfo(v) {
+  if (!/^[A-Za-z0-9_-]{11}$/.test(String(v || ''))) throw yerr('badinput', '動画IDの形ではないみたい');
+  const html = await ytFetchText('https://www.youtube.com/watch?v=' + v);
+  const end = (html.match(/"liveBroadcastDetails":\{[^}]*"endTimestamp":"([^"]+)"/) || [])[1];
+  const uc = (html.match(/"channelId":"(UC[\w-]{22})"/) || [])[1] || '';
+  const title = (html.match(/<meta name="title" content="([^"]*)"/) || [])[1] || '';
+  return { videoId: v, start: ytStartOf(html), end: end ? (Date.parse(end) || 0) : 0, live: /"isLiveNow":true/.test(html), channelId: uc, title: decodeHtml(title) };
 }
 function decodeHtml(s) { return String(s || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'); }
 /** ページの中の JSON(ytInitialData など)を取り出す */
@@ -228,4 +243,4 @@ async function ytLatest(q, n) {
   return { channel, items };
 }
 
-module.exports = { resolve: ytResolve, init: ytInit, next: ytNext, latest: ytLatest, _archiveOf: ytArchiveOf };
+module.exports = { resolve: ytResolve, init: ytInit, next: ytNext, latest: ytLatest, vinfo: ytVinfo, _archiveOf: ytArchiveOf, _startOf: ytStartOf };
